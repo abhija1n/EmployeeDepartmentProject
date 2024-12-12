@@ -4,6 +4,7 @@ package com.assesment.spring.EmployeDepartmentService.service.impl;
 import com.assesment.spring.EmployeDepartmentService.dto.ApiResponseDto;
 import com.assesment.spring.EmployeDepartmentService.dto.CurrencyDto;
 import com.assesment.spring.EmployeDepartmentService.dto.EmployeeDto;
+import com.assesment.spring.EmployeDepartmentService.exception.EmployeeServiceException;
 import com.assesment.spring.EmployeDepartmentService.model.Department;
 import com.assesment.spring.EmployeDepartmentService.model.Employee;
 import com.assesment.spring.EmployeDepartmentService.repository.DepartmentRepository;
@@ -29,30 +30,43 @@ public class EmployeeServiceImpl implements EmployeeService {
     DepartmentRepository departmentRepository;
     @Override
     public ApiResponseDto<String> saveEmployees(Map<String, List<Map<String, Object>>> data) {
-        List<Map<String, Object>> empData= data.get("employees");
+        List<Map<String, Object>> empData = data.get("employees");
 
-        for (Map<String,Object> employeMap: empData) {
-            //fetch the department Name
-            String department= (String) employeMap.get("department");
+        if (empData == null || empData.isEmpty()) {
+            throw new EmployeeServiceException("Employee data is missing or empty", "DATA_VALIDATION_ERROR");
+        }
 
-            Department dep= departmentRepository.findByDepName(department)
-                    .orElseGet(()->{
-                       Department newDepartment= new Department();
-                       newDepartment.setDepName(department);
-                       return departmentRepository.save(newDepartment);
+        for (Map<String, Object> employeeMap : empData) {
+            // Fetch the department name
+            String department = (String) employeeMap.get("department");
+            if (department == null || department.isEmpty()) {
+                throw new EmployeeServiceException("Department name is missing", "DATA_VALIDATION_ERROR");
+            }
+
+            // Check and save department
+            Department dep = departmentRepository.findByDepName(department)
+                    .orElseGet(() -> {
+                        Department newDepartment = new Department();
+                        newDepartment.setDepName(department);
+                        return departmentRepository.save(newDepartment);
                     });
 
-            //Save the employees in Db
-            Employee employee= new Employee();
-            employee.setEmpName((String) employeMap.get("empName"));
-            employee.setAmount(Double.parseDouble(employeMap.get("amount").toString()));
-            employee.setCurrency((String) employeMap.get("currency"));
-            employee.setJoiningDate((String) employeMap.get("joiningDate"));
-            employee.setLeavingDate((String) employeMap.get("leavingDate"));
-            employee.setDepartment(dep);
-            employeeRepository.save(employee);
+            try {
+                // Save the employee in DB
+                Employee employee = new Employee();
+                employee.setEmpName((String) employeeMap.get("empName"));
+                employee.setAmount(Double.parseDouble(employeeMap.get("amount").toString()));
+                employee.setCurrency((String) employeeMap.get("currency"));
+                employee.setJoiningDate((String) employeeMap.get("joiningDate"));
+                employee.setLeavingDate((String) employeeMap.get("leavingDate"));
+                employee.setDepartment(dep);
+                employeeRepository.save(employee);
+            } catch (Exception e) {
+                throw new EmployeeServiceException("Failed to save employee data", e);
+            }
         }
-        ApiResponseDto<String> responseDto= new ApiResponseDto<>();
+
+        ApiResponseDto<String> responseDto = new ApiResponseDto<>();
         responseDto.setErrorMessage("");
         responseDto.setData("Employee Data Saved Successfully");
         return responseDto;
@@ -60,9 +74,21 @@ public class EmployeeServiceImpl implements EmployeeService {
 
     @Override
     public ApiResponseDto<List<CurrencyDto>> getEligibleEmployees(String date) {
-        List<Employee> eligibleEmployees = employeeRepository.findByJoiningDateBeforeAndExitDateAfter(date, date);
+        if (date == null || date.isEmpty()) {
+            throw new EmployeeServiceException("Date parameter is missing", "DATA_VALIDATION_ERROR");
+        }
 
-        // Group employees by currency
+        List<Employee> eligibleEmployees;
+        try {
+            eligibleEmployees = employeeRepository.findByJoiningDateBeforeAndExitDateAfter(date, date);
+        } catch (Exception e) {
+            throw new EmployeeServiceException("Failed to fetch eligible employees", e);
+        }
+
+        if (eligibleEmployees.isEmpty()) {
+            throw new EmployeeServiceException("No eligible employees found for the given date", "NO_DATA_FOUND");
+        }
+
         List<CurrencyDto> currencyGroups = eligibleEmployees.stream()
                 .collect(Collectors.groupingBy(Employee::getCurrency))
                 .entrySet()
@@ -84,4 +110,5 @@ public class EmployeeServiceImpl implements EmployeeService {
         response.setData(currencyGroups);
         return response;
     }
+
 }
